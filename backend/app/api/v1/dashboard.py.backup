@@ -1,0 +1,62 @@
+from datetime import date
+
+from fastapi import APIRouter, Depends
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.ai.context_builder import build_context
+from app.ai.provider import get_ai_provider
+from app.core.dependencies import WorkspaceContext, get_workspace_context
+from app.db.session import get_db
+from app.models.commitment import Commitment, WaitingFor
+from app.models.enums import CommitmentStatus, ProjectStatus, RiskStatus, TaskStatus, WaitingForStatus
+from app.models.project import Project
+from app.models.risk import Risk
+from app.models.task import Task
+
+router = APIRouter(prefix="/dashboard", tags=["dashboard"])
+
+_BRIEFING_SYSTEM_PROMPT = """You write a short, warm 'Morning Brief' for a busy professional,
+based on their real task/commitment data (given as JSON). 2-4 sentences, plain text, no markdown.
+Mention the single most important thing first."""
+
+
+@router.get("")
+async def get_dashboard(ctx: WorkspaceContext = Depends(get_workspace_context), db: AsyncSession = Depends(get_db)):
+    today = date.today()
+    ws = ctx.workspace_id
+
+    async def count(model, *conditions):
+        result = await db.execute(select(func.count()).select_from(model).where(model.workspace_id == ws, *conditions))
+        return result.scalar_one()
+
+    open_tasks = await count(Task, Task.status.in_([TaskStatus.todo, TaskStatus.in_progress]))
+    completed_today = await count(Task, Task.status == TaskStatus.done, Task.completed_at.is_not(None), func.date(Task.completed_at) == today)
+    overdue = await count(Task, Task.deadline.is_not(None), Task.deadline < today, Task.status.in_([TaskStatus.todo, TaskStatus.in_progress]))
+    active_projects = await count(Project, Project.status == ProjectStatus.active)
+    upcoming_deadlines = await count(Task, Task.deadline.is_not(None), Task.deadline >= today, Task.status != TaskStatus.done)
+    open_commitments = await count(Commitment, Commitment.status == CommitmentStatus.open)
+    waiting_for_count = await count(WaitingFor, WaitingFor.status == WaitingForStatus.waiting)
+    risks_count = await count(Risk, Risk.status == RiskStatus.open)
+
+    context = await build_context(db, ws, ctx.user.id)
+    provider = get_ai_provider()
+    briefing_result = await provider.complete_json(_BRIEFING_SYSTEM_PROMPT, str(context))
+    briefing = (briefing_result.get("morning_brief") or briefing_result.get("summary")) if briefing_result else None
+    if not briefing:
+        briefing = "AI-брифинг азыр жеткиликтүү эмес. Негизги статистика төмөндө көрсөтүлдү."
+
+    return {
+        "today": {
+            "tasks": context["today_tasks"],
+            "overdue_tasks": context["overdue_tasks"],
+            "commitments": context["open_commitments"][:5],
+            "waiting_for": context["waiting_for"][:5],
+        },
+        "metrics": {
+            "open_tasks": open_tasks, "completed_today": completed_today, "overdue": overdue,
+            "active_projects": active_projects, "upcoming_deadlines": upcoming_deadlines,
+            "open_commitments": open_commitments, "waiting_for": waiting_for_count, "risks": risks_count,
+        },
+        "ai_briefing": briefing,
+    }

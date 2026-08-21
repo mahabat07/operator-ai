@@ -1,0 +1,106 @@
+"use client";
+import { useEffect, useState } from "react";
+import { api } from "@/lib/api";
+
+type InboxItem = {
+  id: string;
+  raw_text: string;
+  type: string | null;
+  ai_suggestion: { type?: string; title?: string; priority?: string; deadline?: string | null; person?: string | null } | null;
+  status: string;
+};
+
+export default function InboxPage() {
+  const [items, setItems] = useState<InboxItem[]>([]);
+  const [text, setText] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function load() {
+    const data = await api.get<InboxItem[]>("/inbox");
+    setItems(data);
+  }
+
+  useEffect(() => { load(); }, []);
+
+  async function capture(e: React.FormEvent) {
+    e.preventDefault();
+    if (!text.trim()) return;
+    setSubmitting(true);
+    try {
+      await api.post("/inbox", { raw_text: text });
+      setText("");
+      await load();
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function confirm(id: string) {
+    await api.post(`/inbox/${id}/confirm`);
+    await load();
+  }
+
+  async function dismiss(id: string) {
+    await api.post(`/inbox/${id}/dismiss`);
+    await load();
+  }
+
+  const unprocessed = items.filter((i) => i.status === "unprocessed");
+  const processed = items.filter((i) => i.status !== "unprocessed");
+
+  return (
+    <div className="flex flex-col gap-6">
+      <div>
+        <h1 className="text-2xl font-semibold mb-2">Universal Inbox</h1>
+        <p className="text-gray-500 text-sm mb-4">
+          Drop anything here. The AI classifies it — type, priority, deadline — you just confirm.
+          This is the same auto-priority engine used everywhere else, so nothing defaults to a silent "medium".
+        </p>
+        <form onSubmit={capture} className="flex gap-2">
+          <input
+            className="flex-1 border rounded-lg px-3 py-2"
+            placeholder="e.g. 'urgent: send the Q3 contract to Anna by Friday'"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+          />
+          <button disabled={submitting} className="bg-black text-white px-4 py-2 rounded-lg disabled:opacity-50">Capture</button>
+        </form>
+      </div>
+
+      <section>
+        <h2 className="font-medium mb-2">Needs review ({unprocessed.length})</h2>
+        <ul className="flex flex-col gap-3">
+          {unprocessed.map((i) => (
+            <li key={i.id} className="bg-white border rounded-xl p-4">
+              <p className="mb-2">{i.raw_text}</p>
+              {i.ai_suggestion && (
+                <div className="flex gap-2 text-xs text-gray-500 mb-3 flex-wrap">
+                  {i.ai_suggestion.type && <span className="bg-gray-100 rounded-full px-2 py-0.5">{i.ai_suggestion.type}</span>}
+                  {i.ai_suggestion.priority && <span className="bg-gray-100 rounded-full px-2 py-0.5">priority: {i.ai_suggestion.priority}</span>}
+                  {i.ai_suggestion.deadline && <span className="bg-gray-100 rounded-full px-2 py-0.5">due: {i.ai_suggestion.deadline}</span>}
+                </div>
+              )}
+              <div className="flex gap-2">
+                <button onClick={() => confirm(i.id)} className="text-sm bg-black text-white px-3 py-1.5 rounded-lg">Confirm & create</button>
+                <button onClick={() => dismiss(i.id)} className="text-sm border px-3 py-1.5 rounded-lg">Dismiss</button>
+              </div>
+            </li>
+          ))}
+          {unprocessed.length === 0 && <p className="text-gray-400 text-sm">Nothing pending review.</p>}
+        </ul>
+      </section>
+
+      <section>
+        <h2 className="font-medium mb-2">Processed</h2>
+        <ul className="flex flex-col gap-2">
+          {processed.map((i) => (
+            <li key={i.id} className="text-sm text-gray-500 border-b py-2 flex justify-between">
+              <span>{i.raw_text}</span>
+              <span className="text-xs uppercase">{i.status}</span>
+            </li>
+          ))}
+        </ul>
+      </section>
+    </div>
+  );
+}
