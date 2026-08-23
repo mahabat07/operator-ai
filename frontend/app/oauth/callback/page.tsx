@@ -2,15 +2,20 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { saveTokens, api } from "@/lib/api";
 
-export default function GoogleCallbackPage() {
+export default function GoogleAuthCallbackPage() {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const hash = window.location.hash.substring(1);
-    const params = new URLSearchParams(hash);
+    const hash = window.location.hash;
+
+    if (!hash) {
+      setError("Google login did not return valid tokens.");
+      return;
+    }
+
+    const params = new URLSearchParams(hash.substring(1));
 
     const accessToken = params.get("access_token");
     const refreshToken = params.get("refresh_token");
@@ -20,35 +25,21 @@ export default function GoogleCallbackPage() {
       return;
     }
 
-    saveTokens(accessToken, refreshToken);
+    try {
+      localStorage.setItem("access_token", accessToken);
+      localStorage.setItem("refresh_token", refreshToken);
 
-    window.history.replaceState(
-      {},
-      document.title,
-      "/oauth/callback"
-    );
+      window.history.replaceState(
+        null,
+        "",
+        window.location.pathname
+      );
 
-    // After login, check if user already has a Google Workspace connection
-    // If not, redirect to Settings so they can connect Gmail/Calendar
-    async function checkAndRedirect() {
-      try {
-        const status = await api.get<{ connected: boolean; email?: string }>(
-          "/integrations/google/status"
-        );
-        if (status.connected) {
-          // Already connected - go to dashboard
-          router.replace("/dashboard");
-        } else {
-          // First time - redirect to settings to connect Google Workspace
-          router.replace("/settings");
-        }
-      } catch {
-        // If check fails (e.g. token issue), just go to dashboard
-        router.replace("/dashboard");
-      }
+      router.replace("/dashboard");
+    } catch (err) {
+      console.error(err);
+      setError("Failed to save Google login tokens.");
     }
-
-    checkAndRedirect();
   }, [router]);
 
   if (error) {
@@ -58,8 +49,13 @@ export default function GoogleCallbackPage() {
           <h1 className="text-xl font-semibold mb-2">
             Google login failed
           </h1>
+
           <p className="text-red-600">{error}</p>
-          <a href="/login" className="underline mt-4 inline-block">
+
+          <a
+            href="/login"
+            className="underline mt-4 inline-block"
+          >
             Back to login
           </a>
         </div>
