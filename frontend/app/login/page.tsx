@@ -13,7 +13,7 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
 
   function loginWithGoogle() {
-    window.location.href = "http://localhost:8001/api/v1/auth/google/login";
+    window.location.href = `${process.env.NEXT_PUBLIC_API_URL}/auth/google/login`;
   }
 
   async function onSubmit(e: React.FormEvent) {
