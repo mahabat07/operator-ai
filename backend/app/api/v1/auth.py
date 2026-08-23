@@ -169,7 +169,7 @@ async def google_callback(code: str, db: AsyncSession = Depends(get_db)):
     tokens = _tokens_for(user)
 
     frontend_url = (
-        "http://localhost:3001/oauth/callback"
+        "https://operator-ai-tau.vercel.app/oauth/callback"
         f"#access_token={tokens.access_token}"
         f"&refresh_token={tokens.refresh_token}"
     )
